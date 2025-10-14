@@ -27,7 +27,7 @@ resource "azurerm_storage_account" "terraform" {
 
 resource "azurerm_storage_container" "terraform" {
   name                  = "terraform-state"
-  storage_account_name  = azurerm_storage_account.terraform.name
+  storage_account_id    = azurerm_storage_account.terraform.id
   container_access_type = "private"
 }
 

@@ -43,7 +43,7 @@ variable "db_server" {
 }
 
 variable "db_root_user" {
-  description = "Username of the azure MariaDB root user"
+  description = "Username of the Azure PostgreSQL root user"
 }
 
 variable "registry_name" {
