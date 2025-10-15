@@ -36,20 +36,20 @@ registry_name=""
 
 # VM type for the cluster nodes. More info about possible options: https://docs.microsoft.com/en-us/azure/virtual-machines/linux/compute-benchmark-scores
 # Because of the way memory is reserved: https://docs.microsoft.com/en-us/azure/aks/concepts-clusters-workloads#resource-reservations
-# a VM type with at least 16GB of memory is recommended. By default 2 node will be created, which later can be easily scaled up or down.
+# a VM type with at least 16GB of memory is recommended. By default 2 nodes will be created, which later can be easily scaled up or down.
 vm_size="Standard_D4s_v5"
 
 # Number of agents (should be at least 2 for productive use)
-num_agents="2"
+num_agents=2
 
 # Disk size of Node VM. Must be able to store all active Docker images
-vm_disk_gb="128"
+vm_disk_gb=128
 
 # The maximum number of pods that can run on each agent
-max_pods="100"
+max_pods=100
 
 # unique within Azure region
-# example: nevisk8s, cluster url will have the following format:  <dns_prefix>-<number>.hcp.westeurope.azmk8s.io.com
+# example: nevisk8s, cluster url will have the following format:  <dns_prefix>-<number>.hcp.westeurope.azmk8s.io
 dns_prefix=""
 
 # option to enable role based access control, for more information visit: https://kubernetes.io/docs/reference/access-authn-authz/rbac/

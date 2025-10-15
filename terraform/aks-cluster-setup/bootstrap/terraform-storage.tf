@@ -31,6 +31,6 @@ resource "azurerm_storage_container" "terraform" {
   container_access_type = "private"
 }
 
-output "storage-account-name" {
+output "storage_account_name" {
   value = azurerm_storage_account.terraform.name
 }

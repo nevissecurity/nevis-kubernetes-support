@@ -16,12 +16,13 @@ variable "cluster_name" {
 }
 
 variable "kubernetes_version" {
-  description = "Kubernetes version, see: az aks get-versions --location 'West Europe -o table'"
+  description = "Kubernetes version, see: az aks get-versions --location 'West Europe' -o table"
 }
 
 variable "num_agents" {
   description = "Number of agents (should be at least 2 for productive use)"
-  default     = "2"
+  type        = number
+  default     = 2
 }
 
 variable "vm_size" {
@@ -30,12 +31,14 @@ variable "vm_size" {
 
 variable "vm_disk_gb" {
   description = "Disk size of Node VM. Must be able to store all active Docker images"
-  default     = "128"
+  type        = number
+  default     = 128
 }
 
 variable "max_pods" {
   description = "The maximum number of pods that can run on each agent"
-  default     = "100"
+  type        = number
+  default     = 100
 }
 
 variable "db_server" {

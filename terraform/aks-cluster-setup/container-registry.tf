@@ -8,6 +8,6 @@ resource "azurerm_container_registry" "registry" {
 resource "azurerm_role_assignment" "registry_access_aks_cluster" {
   principal_id = azurerm_kubernetes_cluster.aks_cluster.kubelet_identity[0].object_id
  
-  role_definition_name = "Reader"
+  role_definition_name = "AcrPull"
   scope                = azurerm_container_registry.registry.id
 }
