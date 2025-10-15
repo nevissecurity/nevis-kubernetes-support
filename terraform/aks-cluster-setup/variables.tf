@@ -1,9 +1,9 @@
 variable "resource_group_name" {
-  description = "Name of the resource group you plan on deploying the resources."
+  description = "Name of the resource group which will contain most resources."
 }
 
 variable "node_resource_group_name" {
-  description = "The name of the Resource Group where the Kubernetes Nodes should exist."
+  description = "Name of the resource group for the Kubernetes nodes."
 }
 
 variable "location" {
@@ -20,7 +20,7 @@ variable "kubernetes_version" {
 }
 
 variable "num_agents" {
-  description = "Number of agents (should be at least 2 for productive use)"
+  description = "Number of agents (must be >=2 for productive use)"
   type        = number
   default     = 2
 }
@@ -62,7 +62,7 @@ variable "dns_prefix" {
 }
 
 variable "vnet_subnet_cidr" {
-  description = "Subnet in CIDR form where the AKS agents and Pods will be created. Must be a subnet of the virtual network and least a /24 network (recommended: /21)."
+  description = "Subnet in CIDR form where the AKS agents and Pods will be created. Must be a subnet of the virtual network and at least a /24 network (recommended: /21)."
   default     = "10.1.0.0/21"
 }
 
