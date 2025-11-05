@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SOURCE="cloudsmith"
+USERNAME="${GITHUB_TOKEN:-}"  # Default to same as token if not set explicitly
 TOKEN="${GITHUB_TOKEN:-}"  # Pre-fill from env var if available
 ACR_NAME=""
 VERSION=""
@@ -10,10 +11,11 @@ print_help() {
   echo ""
   echo "Script to pull Docker images from a source registry and push to a target Azure Container Registry"
   echo ""
-  echo "Usage: $0 [--source github|cloudsmith] [--token <token>] --target <target_acr_name> --version <nevis_version>"
+  echo "Usage: $0 [--source github|cloudsmith] [--username <name>] [--token <token>] --target <target_acr_name> --version <nevis_version>"
   echo ""
   echo "Notes:"
   echo "  - If the environment variable GITHUB_TOKEN is set, --token is optional."
+  echo "  - --username is only required for GitHub; Cloudsmith uses a fixed account."
   echo "  - Only Nevis employees can pull from GitHub."
   echo "  - Other users should pull from Cloudsmith (default)."
   echo ""
@@ -25,6 +27,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --source)
       SOURCE="$2"
+      shift 2
+      ;;
+    --username)
+      USERNAME="$2"
       shift 2
       ;;
     --token)
@@ -55,6 +61,10 @@ done
 # === Validate parameters ===
 missing=()
 
+if [[ "$SOURCE" == "github" && -z "$USERNAME" ]]; then
+  missing+=("--username (or set GITHUB_TOKEN)")
+fi
+
 if [[ -z "$TOKEN" ]]; then
   # Only mark token as missing if GITHUB_TOKEN was not set
   missing+=("--token (or set GITHUB_TOKEN)")
@@ -74,6 +84,11 @@ fi
 if [[ "$SOURCE" != "cloudsmith" && "$SOURCE" != "github" ]]; then
   echo "❌ Invalid --source value: '$SOURCE' (must be 'cloudsmith' or 'github')"
   exit 1
+fi
+
+# === Normalize ACR name ===
+if [[ "$ACR_NAME" != *.azurecr.io ]]; then
+  ACR_NAME="${ACR_NAME}.azurecr.io"
 fi
 
 # === Configuration ===
@@ -119,12 +134,12 @@ case "$SOURCE" in
   github)
     SRC_REGISTRY="$GITHUB_REGISTRY"
     echo "🔐 Logging into GitHub Container Registry..."
-    echo "$TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
+    docker login ghcr.io -u "$USERNAME" -p "$TOKEN"
     ;;
   cloudsmith)
     SRC_REGISTRY="$CLOUDSMITH_REGISTRY"
     echo "🔐 Logging into Cloudsmith..."
-    echo "$TOKEN" | docker login docker.cloudsmith.io -u USERNAME --password-stdin
+    docker login docker.cloudsmith.io -u nevissecurity/rolling -p "$TOKEN"
     ;;
   *)
     echo "❌ Error: Unknown source '$SOURCE'. Must be 'github' or 'cloudsmith'."
@@ -176,14 +191,14 @@ echo "🚀 Syncing Nevis images (version: $VERSION)..."
 
 for IMAGE in "${COMMON_IMAGES[@]}"; do
   SRC_IMAGE="${SRC_REGISTRY}/${IMAGE}:${VERSION}"
-  DST_IMAGE="${ACR_NAME}/${IMAGE}:${VERSION}"
+  DST_IMAGE="${ACR_NAME}/nevis/${IMAGE}:${VERSION}"
   pull_and_push_image "$SRC_IMAGE" "$DST_IMAGE" "$VERSION"
 done
 
 # === Sync static-version images (unchanged) ===
 for IMAGE in "${STATIC_IMAGES[@]}"; do
   SRC_IMAGE="${SRC_REGISTRY}/${IMAGE}"
-  DST_IMAGE="${ACR_NAME}/${IMAGE}"
+  DST_IMAGE="${ACR_NAME}/nevis/${IMAGE}"
   echo "→ Syncing static image: $SRC_IMAGE → $DST_IMAGE"
   if docker pull "$SRC_IMAGE"; then
     docker tag "$SRC_IMAGE" "$DST_IMAGE"
