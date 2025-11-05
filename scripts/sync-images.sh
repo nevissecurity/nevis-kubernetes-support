@@ -2,74 +2,66 @@
 set -euo pipefail
 
 SOURCE="cloudsmith"
-USERNAME="${GITHUB_TOKEN:-}"  # Default to same as token if not set explicitly
-TOKEN="${GITHUB_TOKEN:-}"  # Pre-fill from env var if available
+USERNAME="${GITHUB_TOKEN:-}"
+TOKEN="${GITHUB_TOKEN:-}"
 ACR_NAME=""
 VERSION=""
+declare -A TAG_OVERRIDES
+SKIP_IMAGES=()
 
 print_help() {
   echo ""
   echo "Script to pull Docker images from a source registry and push to a target Azure Container Registry"
   echo ""
   echo "Usage: $0 [--source github|cloudsmith] [--username <name>] [--token <token>] --target <target_acr_name> --version <nevis_version>"
+  echo "          [--tags <img1:tag1> <img2:tag2> ...] [--skip-images <img1> <img2> ...]"
   echo ""
-  echo "Notes:"
-  echo "  - If the environment variable GITHUB_TOKEN is set, --token is optional."
-  echo "  - --username is only required for GitHub; Cloudsmith uses a fixed account."
-  echo "  - Only Nevis employees can pull from GitHub."
-  echo "  - Other users should pull from Cloudsmith (default)."
-  echo ""
-  echo "Example: $0 --source cloudsmith --token *** --target myacr --version 8.2511.0"
+  echo "Examples:"
+  echo "  $0 --source cloudsmith --token *** --target myacr --version 8.2511.0"
+  echo "  $0 --target myacr --version 8.2511.0 --tags nevisproxy:8.2505.7 nevisproxy-dbschema:8.2505.4"
+  echo "  $0 --target myacr --version 8.2511.0 --skip-images nevisdetect-core nevisauth"
   echo ""
 }
 
+# === Parse arguments ===
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --source)
-      SOURCE="$2"
-      shift 2
-      ;;
+      SOURCE="$2"; shift 2 ;;
     --username)
-      USERNAME="$2"
-      shift 2
-      ;;
+      USERNAME="$2"; shift 2 ;;
     --token)
-      TOKEN="$2"
-      shift 2
-      ;;
+      TOKEN="$2"; shift 2 ;;
     --target)
-      ACR_NAME="$2"
-      shift 2
-      ;;
+      ACR_NAME="$2"; shift 2 ;;
     --version)
-      VERSION="$2"
-      shift 2
+      VERSION="$2"; shift 2 ;;
+    --tags)
+      shift
+      while [[ $# -gt 0 && "$1" != --* ]]; do
+        IFS=':' read -r img tag <<< "$1"
+        TAG_OVERRIDES["$img"]="$tag"
+        shift
+      done
+      ;;
+    --skip-images)
+      shift
+      while [[ $# -gt 0 && "$1" != --* ]]; do
+        SKIP_IMAGES+=("$1")
+        shift
+      done
       ;;
     -h|--help)
-      print_help
-      exit 0
-      ;;
+      print_help; exit 0 ;;
     *)
-      echo "❌ Unknown parameter: $1"
-      echo ""
-      print_help
-      exit 1
-      ;;
+      echo "❌ Unknown parameter: $1"; echo ""; print_help; exit 1 ;;
   esac
 done
 
 # === Validate parameters ===
 missing=()
-
-if [[ "$SOURCE" == "github" && -z "$USERNAME" ]]; then
-  missing+=("--username (or set GITHUB_TOKEN)")
-fi
-
-if [[ -z "$TOKEN" ]]; then
-  # Only mark token as missing if GITHUB_TOKEN was not set
-  missing+=("--token (or set GITHUB_TOKEN)")
-fi
-
+[[ "$SOURCE" == "github" && -z "$USERNAME" ]] && missing+=("--username")
+[[ -z "$TOKEN" ]] && missing+=("--token (or set GITHUB_TOKEN)")
 [[ -z "$ACR_NAME" ]] && missing+=("--target")
 [[ -z "$VERSION" ]] && missing+=("--version")
 
@@ -80,7 +72,6 @@ if (( ${#missing[@]} > 0 )); then
   exit 1
 fi
 
-# === Optional validation for source ===
 if [[ "$SOURCE" != "cloudsmith" && "$SOURCE" != "github" ]]; then
   echo "❌ Invalid --source value: '$SOURCE' (must be 'cloudsmith' or 'github')"
   exit 1
@@ -92,7 +83,6 @@ if [[ "$ACR_NAME" != *.azurecr.io ]]; then
 fi
 
 # === Configuration ===
-# Images that use the provided version
 COMMON_IMAGES=(
   nevisproxy
   nevisproxy-dbschema
@@ -119,17 +109,15 @@ COMMON_IMAGES=(
   nevis-base-flyway
 )
 
-# Images with their own fixed version
 STATIC_IMAGES=(
   "nevis-git-init:1.4.0"
   "nevis-ubi-tools:1.4.0"
 )
 
-# Registry definitions
 GITHUB_REGISTRY="ghcr.io/nevissecurity"
 CLOUDSMITH_REGISTRY="docker.cloudsmith.io/nevissecurity/rolling"
 
-# === Select source registry and authenticate ===
+# === Authenticate ===
 case "$SOURCE" in
   github)
     SRC_REGISTRY="$GITHUB_REGISTRY"
@@ -141,71 +129,67 @@ case "$SOURCE" in
     echo "🔐 Logging into Cloudsmith..."
     docker login docker.cloudsmith.io -u nevissecurity/rolling -p "$TOKEN"
     ;;
-  *)
-    echo "❌ Error: Unknown source '$SOURCE'. Must be 'github' or 'cloudsmith'."
-    exit 1
-    ;;
 esac
 
-# === Login to Azure Container Registry ===
 echo "🔐 Logging into Azure Container Registry: $ACR_NAME"
 az acr login --name "$ACR_NAME" >/dev/null
 
+# === Helper functions ===
+contains() {
+  local e match="$1"; shift
+  for e; do [[ "$e" == "$match" ]] && return 0; done
+  return 1
+}
+
 pull_and_push_image() {
-  local src="$1"
-  local dst="$2"
-  local version="$3"
+  local image="$1"
+  local src_version="$2"
 
-  local major minor patch
-  IFS='.' read -r major minor patch <<< "$version"
+  local src="${SRC_REGISTRY}/${image}:${src_version}"
+  local dst="${ACR_NAME}/nevis/${image}:${src_version}"
 
-  # Ensure patch is numeric
-  if ! [[ "$patch" =~ ^[0-9]+$ ]]; then
-    echo "⚠️  Invalid version format: $version"
-    return
+  echo "→ Syncing $src → $dst"
+
+  if docker pull "$src"; then
+    docker tag "$src" "$dst"
+    docker push "$dst"
+    echo "✓ Synced $(basename "$dst"):$src_version"
+  else
+    echo "❌ Image not found: $src"
+    exit 1
   fi
-
-  while (( patch >= 0 )); do
-    local current_version="$major.$minor.$patch"
-    local current_src="${src%:$version}:$current_version"
-    local current_dst="${dst%:$version}:$current_version"
-
-    echo "→ Attempting: $current_src → $current_dst"
-
-    if docker pull "$current_src"; then
-      docker tag "$current_src" "$current_dst"
-      docker push "$current_dst"
-      echo "✓ Synced $(basename "$current_dst"):$current_version"
-      return 0
-    else
-      echo "⚠️  Image not found: $current_src"
-      ((patch--))
-    fi
-  done
-
-  echo "⚠️  No available version found for $(basename "$dst"). Skipping."
 }
 
 # === Sync versioned images ===
 echo "🚀 Syncing Nevis images (version: $VERSION)..."
 
 for IMAGE in "${COMMON_IMAGES[@]}"; do
-  SRC_IMAGE="${SRC_REGISTRY}/${IMAGE}:${VERSION}"
-  DST_IMAGE="${ACR_NAME}/nevis/${IMAGE}:${VERSION}"
-  pull_and_push_image "$SRC_IMAGE" "$DST_IMAGE" "$VERSION"
+  if contains "$IMAGE" "${SKIP_IMAGES[@]}"; then
+    echo "⏭️  Skipping image: $IMAGE"
+    continue
+  fi
+
+  IMG_VERSION="${TAG_OVERRIDES[$IMAGE]:-$VERSION}"
+  pull_and_push_image "$IMAGE" "$IMG_VERSION"
 done
 
-# === Sync static-version images (unchanged) ===
+# === Sync static-version images ===
 for IMAGE in "${STATIC_IMAGES[@]}"; do
   SRC_IMAGE="${SRC_REGISTRY}/${IMAGE}"
   DST_IMAGE="${ACR_NAME}/nevis/${IMAGE}"
+  NAME="${IMAGE%%:*}"
+  if contains "$NAME" "${SKIP_IMAGES[@]}"; then
+    echo "⏭️  Skipping static image: $NAME"
+    continue
+  fi
   echo "→ Syncing static image: $SRC_IMAGE → $DST_IMAGE"
   if docker pull "$SRC_IMAGE"; then
     docker tag "$SRC_IMAGE" "$DST_IMAGE"
     docker push "$DST_IMAGE"
     echo "✓ Synced static $(basename "$DST_IMAGE")"
   else
-    echo "⚠️  Static image not found: $SRC_IMAGE. Skipping."
+    echo "❌ Static image not found: $SRC_IMAGE"
+    exit 1
   fi
 done
 
